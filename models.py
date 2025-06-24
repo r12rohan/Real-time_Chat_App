@@ -9,3 +9,4 @@ class Message(Base):
     content = Column(Text)
     room = Column(String, index=True)
     username = Column(String, ForeignKey("users.username"))
+   

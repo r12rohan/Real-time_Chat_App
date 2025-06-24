@@ -20,7 +20,7 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 # JWT settings
-SECRET_KEY = "your-secret-key"
+SECRET_KEY = "your-secret-key"   
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
