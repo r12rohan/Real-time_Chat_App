@@ -1,23 +1,17 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy import Column, String
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from uuid import uuid4
 from datetime import datetime, timedelta
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional
+from models import Room, User
+from routers import rooms
+from sqlalchemy import select
+from database import async_session
 
-DATABASE_URL = "postgresql://username:password@localhost:5432/users_db"
 
-# SQLAlchemy setup
-Base = declarative_base()
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 # JWT settings
 SECRET_KEY = "your-secret-key"   
@@ -31,20 +25,72 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 app = FastAPI()
 
-class User(Base):
-    __tablename__ = "users"
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4, index=True)
-    username = Column(String, unique=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+app.include_router(rooms.router)
+
 
 class Token(BaseModel):
     access_token: str
     token_type: str
 
-class UserBase(BaseModel):
+class UserCreate(BaseModel):
     username: str
+    password: str
+    email: EmailStr
 
-Base.metadata.create_all(bind=engine)
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for conn in self.active_connections:
+            await conn.send_text(message)
+
+async def get_db() -> AsyncSession:
+    async with async_session() as session:
+        yield session
+
+@app.websocket("/ws/chat/{room_name}/{username}")
+async def websocket_endpoint(websocket: WebSocket, room_name: str, username: str, db: AsyncSession = Depends(get_db)):
+    await manager.connect(websocket)
+
+    result = await db.execute(select(Room).where(Room.name == room_name))
+    room = result.scalar_one_or_none()
+    if not room:
+        await websocket.close(code=1003)
+        return
+
+    # Auto-create user
+    user = await db.execute(
+        User.__table__.select().where(User.username == username)
+    )
+    result = user.scalar_one_or_none()
+    if not result:
+        new_user = User(username=username)
+        db.add(new_user)
+        await db.commit()
+        await db.refresh(new_user)
+        result = new_user
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            msg = Message(content=data, sender_id=result.id)
+            db.add(msg)
+            await db.commit()
+
+            full_message = f"{username}: {data}"
+            await manager.broadcast(full_message)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
 
 def get_password_hash(password):
     return pwd_context.hash(password)
@@ -58,20 +104,15 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_user_by_username(db, username: str):
-    return db.query(User).filter(User.username == username).first()
+async def get_user_by_username(db: AsyncSession, username: str):
+    result = await db.execute(select(User).where(User.username == username))
+    return result.scalar_one_or_none()
 
 def get_user_by_id(db, user_id):
     return db.query(User).filter(User.id == user_id).first()
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: SessionLocal = Depends(get_db)):
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid token",
@@ -92,33 +133,42 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: SessionLocal
 
 # Register route
 @app.post("/signup", response_model=Token)
-def register(form_data: OAuth2PasswordRequestForm = Depends(), db: SessionLocal = Depends(get_db)):
-    user = get_user_by_username(db, form_data.username)
+async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.username == user_data.username))
+    user = result.scalar_one_or_none()
+
     if user:
         raise HTTPException(status_code=400, detail="Username already exists")
 
-    hashed_password = get_password_hash(form_data.password)
-    new_user = User(username=form_data.username, hashed_password=hashed_password)
+    new_user = User(
+        username=user_data.username,
+        hashed_password=user_data.password,
+        email=user_data.email
+    )
     db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    await db.commit()
+    await db.refresh(new_user)
 
     token = create_access_token(data={"sub": str(new_user.id)})
     return {"access_token": token, "token_type": "bearer"}
 
+
+
 # Login route
 @app.post("/token", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: SessionLocal = Depends(get_db)):
-    user = get_user_by_username(db, form_data.username)
-    if not user or not verify_password(form_data.password, user.hashed_password):
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.username == form_data.username))
+    user = result.scalar_one_or_none()
+
+    if not user or user.hashed_password != form_data.password:
         raise HTTPException(status_code=400, detail="Incorrect username or password")
-    
+
     token = create_access_token(data={"sub": str(user.id)})
     return {"access_token": token, "token_type": "bearer"}
 
 # Delete user route
 @app.delete("/delete-user")
-def delete_user(current_user: User = Depends(get_current_user), db: SessionLocal = Depends(get_db)):
-    db.delete(current_user)
-    db.commit()
-    return {"msg": "User deleted successfully"}  
+async def delete_user(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await db.delete(current_user)
+    await db.commit()
+    return {"msg": "User deleted successfully"} 
