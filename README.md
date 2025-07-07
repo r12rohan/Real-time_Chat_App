@@ -1,18 +1,17 @@
 # FastAPI-Chat
 # Realtime Chat Messaging App
-It is similar to Discord, where authenticated users can chat and join or leave at any time.
+This application functions similarly to Discord, allowing authenticated users to participate in real-time chat and freely join or leave chat sessions at any time.
 * A full-featured Realtime Chat Application built with FastAPI, WebSockets and PostgreSQL.
-* Users can sign up, log in and chat live in different rooms. 
-* Also includes functionality to delete users. 
+* Users can sign up, log in and chat in different rooms. 
 * Admin functionality (RBAC needs to be implemented):
-    * create rooms / Delete rooms
+    * create or Delete rooms
     * Delete users
-* Connects the user to a room and enables real-time chatting.
+* Connects user to a room and enables real-time chatting.
 * Messages are broadcast to all connected users in that room.
 
 # Features
 * User Registration & Login with JWT Authentication.
-* Realtime Chat with WebSocket support:
+* Real-time Chat with WebSocket support:
     * Join or leave chat rooms.
 * Delete user functionality.
 * Clean architecture (routers, services, utils, schemas).
@@ -45,4 +44,4 @@ uvicorn main:app --reload
 Server will be running at:
 http://localhost:8000
 
-4. After starting the server, open two additional terminals and run the chat_client.py file. After that, you can start chatting in real time.
+4. Once the server is running, open two additional terminal windows and execute the chat_client.py file in each. This will enable real-time communication between the connected clients.
