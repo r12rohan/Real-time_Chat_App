@@ -1,4 +1,4 @@
-# fastapi-chat
+# FastAPI-Chat
 # Realtime Chat Messaging App
 A full-featured Realtime Chat Application built with FastAPI, WebSockets, and PostgreSQL.
 Users can sign up, log in, and chat live in different rooms. Also includes functionality to delete users. Only admin can create new rooms existing users can only enter and chat with other users and leave anytime.
