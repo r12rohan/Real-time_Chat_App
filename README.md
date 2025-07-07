@@ -1,4 +1,3 @@
-# FastAPI-Chat
 # Realtime Chat Messaging App
 This application functions similarly to Discord, allowing authenticated users to participate in real-time chat and freely join or leave chat sessions at any time.
 * A full-featured Realtime Chat Application built with FastAPI, WebSockets and PostgreSQL.
