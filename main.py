@@ -66,7 +66,7 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     }
 
 
-@app.post("/token", response_model=Token)
+@app.post("/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
     user = await get_user_by_username(db, form_data.username)
     if not user or user.hashed_password != form_data.password:
